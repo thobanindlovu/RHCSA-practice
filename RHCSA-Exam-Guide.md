@@ -138,6 +138,7 @@ echo 'atenorth' | sudo passwd --stdin tomas
 # Step 6: Verify
 grep 'ntombi\|thapelo\|tomas\|sysadmin' /etc/group
 ```
+
 > The `-s /sbin/nologin` flag prevents interactive shell access for tomas.
 
 ---
@@ -189,7 +190,9 @@ ls -la /common/
 ```bash
    tar -cjvf /backup/opt.tar.bz2 /opt
 ```
-> `-c` create, `-z` gzip compress, `-x` extract, `-v` verbose, `-f` specify filename. 
+> `-c` create, `-z` gzip compress, `-x` extract, `-v` verbose, `-f` specify filename.
+
+---
 
 ### Q8. Configure NTP Client
 
@@ -285,7 +288,7 @@ pwd
 > Create user barry with UID 2112 and set password atenorth
 
 ```bash
-# Step 1: Add User it doesn't exist
+# Step 1: Add User if it doesn't exist
 useradd -u 2112 barry
 
 # Step 2: Add Password
@@ -323,15 +326,15 @@ visudo -c
 ```bash
 # Step 1: Create Directories (As Root)
 mkdir -p /opt/files /opt/processed
-chown Xanadu:xanadu /opt/files /opt/processed
+chown xanadu:xanadu /opt/files /opt/processed
 chmod 777 /opt/files /opt/processed
-loginctl enable-linger Xanadu
+loginctl enable-linger xanadu
 
 # Step 2: SSH to user
 ssh xanadu@ip_address
 
-# Step 3: Login to podman using registry details
-podman login classroom.example.com/Containerfile
+# Step 3: Log in to the registry with podman (only needed if pulling from an authenticated registry)
+podman login classroom.example.com
 # Username:
 # Password:
 
@@ -344,16 +347,17 @@ podman build -t myimage .
 # Step 6: Verify
 podman images
 ```
+> `podman login` takes a registry hostname, not a file path — fixed from `classroom.example.com/Containerfile`. Skip Step 3 entirely if you're only downloading a Containerfile via curl and not authenticating to a registry. Username casing (`xanadu`) is now consistent throughout.
 
 ---
 
 ### Q16. Configure Container as Systemd Service
 
-> Create container 'mycontainer' from built image. Mount /opt/file to /opt/incoming and /opt/processed to /opt/outgoing. Run as user xanadu. Auto-start on reboot.
+> Create container 'mycontainer' from built image. Mount /opt/files to /opt/incoming and /opt/processed to /opt/outgoing. Run as user xanadu. Auto-start on reboot.
 
 ```bash
 # Step 1: Run the container with volume mounts
-podman run -d --name mycontainer -v /opt/file:/opt/incoming:Z -v /opt/processed:/opt/outgoing:Z myimage
+podman run -d --name mycontainer -v /opt/files:/opt/incoming:Z -v /opt/processed:/opt/outgoing:Z myimage
 
 # Step 2: Create systemd user directory and generate service file
 mkdir -p ~/.config/systemd/user
@@ -369,6 +373,7 @@ systemctl --user status container-mycontainer.service
 podman images
 podman ps
 ```
+> Mount source fixed to `/opt/files` (plural) to match the directory created in Q15 — was `/opt/file` (singular), which wouldn't match.
 
 ---
 
@@ -502,27 +507,48 @@ swapon
 > VG: myvol with 8MiB PE. LV: mydatabase with 100 PE. Format as vfat. Mount on /database permanently.
 
 ```bash
-# Step 1: Create the volume group with 8MiB physical extents
-vgcreate -s 8M myvol /dev/sdb
+# Step 1: Identify the available disk/partition
+lsblk
 
-# Step 2: Create the logical volume with 100 extents
+# Step 2: Create a partition using fdisk
+fdisk /dev/sdb
+```
+```
+Inside fdisk:
+  n   -> new partition
+  p   -> primary
+  <partition number, e.g. 1>
+  <Enter>   -> accept default first sector
+  <Enter>   -> accept default last sector (or size, e.g. +800M)
+  t         -> change type
+  8e (or 'Linux LVM')
+  w         -> write and quit
+```
+```bash
+# Step 3: Inform the kernel of the partition table change
+partprobe /dev/sdb
+
+# Step 4: Create the volume group with 8MiB physical extents
+vgcreate -s 8M myvol /dev/sdb1
+
+# Step 5: Create the logical volume with 100 extents
 lvcreate -l 100 -n mydatabase myvol
 
-# Step 3: Install dosfstools and format as vfat
+# Step 6: Install dosfstools and format as vfat
 dnf install -y dosfstools
 mkfs.vfat /dev/myvol/mydatabase
 
-# Step 4: Create the mount directory
+# Step 7: Create the mount directory
 mkdir /database
 
-# Step 5: Get UUID and add to /etc/fstab
+# Step 8: Get UUID and add to /etc/fstab
 lsblk -f
 blkid /dev/myvol/mydatabase
 
 vi /etc/fstab
 # Add: UUID=<your-uuid> /database vfat defaults 0 0
 
-# Step 6: Mount and verify
+# Step 9: Mount and verify
 systemctl daemon-reload
 mount -a
 df -h /database
